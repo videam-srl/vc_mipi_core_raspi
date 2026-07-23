@@ -265,6 +265,52 @@ int vc_write_i2c_reg2(struct i2c_client *client, struct vc_csr2 *csr, const __u3
         return i2c_write_reg2(&client->dev, client, csr, value, __FUNCTION__);
 }
 EXPORT_SYMBOL(vc_write_i2c_reg2);
+
+// ------------------------------------------------------------------------------------------------
+//  Clear HDR (IMX585 only, see FLAG_CLEAR_HDR)
+//
+//  Register map ported from the community imx585-v4l2-driver
+//  (github.com/will127534/imx585-v4l2-driver), which documents WDMODE
+//  (0x301a) and COMBI_EN (0x3024) as latched by the sensor once when
+//  streaming starts, not applied live - hence this is called from
+//  vc_sen_start_stream() rather than a V4L2 control callback.
+//
+//  Only the 12-bit gradation-compressed combined output is wired up here
+//  (CCMP_EN=1, MDBIT=1): the reference driver's 16-bit linear output
+//  (CCMP_EN=0, MDBIT=3) needs a RAW16 mbus code/format this driver
+//  doesn't have. Note there is no combined/compressed RAW10 HDR output
+//  on this sensor - MDBIT=0x00 (RAW10) is only valid in normal,
+//  non-HDR mode - so 12-bit is the lowest bit depth Clear HDR supports.
+//
+//  Per-mode HMAX already satisfies the reference driver's Clear HDR
+//  minimum (550 1H units at 4 lanes, scaled for lane count) for every
+//  existing IMX585 MODE() entry, so no HMAX adjustment is needed here.
+
+int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
+{
+        struct vc_ctrl *ctrl = &cam->ctrl;
+        struct i2c_client *client = ctrl->client_sen;
+        int ret;
+
+        if (!(ctrl->flags & FLAG_CLEAR_HDR))
+                return -EINVAL;
+
+        if (enable) {
+                ret  = vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x10);
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.combi_en, 0x02);
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x01);
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x01);
+        } else {
+                ret  = vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x00);
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.combi_en, 0x00);
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x00);
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x00);
+        }
+
+        return ret;
+}
+EXPORT_SYMBOL(vc_core_set_clear_hdr_mode);
+
 // ------------------------------------------------------------------------------------------------
 //  Helper Functions for debugging
 
@@ -2090,6 +2136,11 @@ int vc_sen_start_stream(struct vc_cam *cam)
         ret  = vc_mod_set_mode(cam, &reset);
         ret |= vc_sen_set_roi(cam);
 
+        if (ctrl->flags & FLAG_CLEAR_HDR) {
+                // Must happen before the mode_operating write below: the
+                // sensor only latches WDMODE/COMBI_EN when streaming starts.
+                ret |= vc_core_set_clear_hdr_mode(cam, state->hdr_mode_enabled);
+        }
 
         vc_notice(dev, "%s(): Start streaming\n", __FUNCTION__);
         vc_dbg(dev, "%s(): MM: 0x%02x, TM: 0x%02x, IO: 0x%02x\n",

@@ -42,6 +42,7 @@ extern int debug;
 
 #define FLAG_PREGIUS_S                  (1 << 18)
 #define FLAG_USE_BINNING_INDEX          (1 << 19)
+#define FLAG_CLEAR_HDR                  (1 << 20)
 
 #define GAIN_DISABLED                   0
 #define GAIN_LINEAR                     1
@@ -171,6 +172,12 @@ struct vc_sen_csr {
         struct vc_csr2 o_height;
         struct vc_csr4 flash_duration;
         struct vc_csr4 flash_offset;
+
+        // Clear HDR (IMX585 only, see FLAG_CLEAR_HDR)
+        __u16 wdmode;   // WDMODE: 0x10 = Clear HDR, 0x00 = normal
+        __u16 combi_en; // COMBI_EN: 0x02 = enable built-in HDR combination
+        __u16 ccmp_en;  // CCMP_EN: gradation-compression enable for 12-bit combined output
+        __u16 mdbit;    // MDBIT: output bit-depth select
 };
 
 struct vc_csr {
@@ -318,6 +325,7 @@ struct vc_state {
         __u8 trigger_mode;
         __u8 binning_mode;
         __u8 former_binning_mode;
+        bool hdr_mode_enabled;          // Clear HDR (see FLAG_CLEAR_HDR); only latched at stream start
         int power_on;
         int streaming;
         __u8 flags;
@@ -340,6 +348,9 @@ int vc_read_i2c_reg(struct i2c_client *client, const __u16 addr);
 int vc_write_i2c_reg(struct i2c_client *client, const __u16 addr, const __u8 value);
 int vc_write_i2c_reg2(struct i2c_client *client, struct vc_csr2 *csr, const __u32 value);
 int vc_write_i2c_reg4(struct i2c_client *client, struct vc_csr4 *csr, const __u32 value);
+
+// --- Clear HDR (IMX585 only) ------------------------------------------------
+int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable);
 
 struct i2c_client *vc_mod_get_client(struct device *dev, struct i2c_adapter *adapter, __u8 i2c_addr);
 

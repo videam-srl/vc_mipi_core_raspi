@@ -1000,7 +1000,13 @@ static void vc_init_ctrl_imx585(struct vc_ctrl *ctrl, struct vc_desc* desc)
         ctrl->flags                    |= FLAG_IO_ENABLED;
         // No trigger support for IMX585
 
-                                         
+        // Clear HDR (see FLAG_CLEAR_HDR users in vc_mipi_core.c). Register
+        // map ported from github.com/will127534/imx585-v4l2-driver.
+        ctrl->flags                    |= FLAG_CLEAR_HDR;
+        ctrl->csr.sen.wdmode            = 0x301a;
+        ctrl->csr.sen.combi_en          = 0x3024;
+        ctrl->csr.sen.ccmp_en           = 0x36ef;
+        ctrl->csr.sen.mdbit             = 0x3023;
 
         FRAME(0, 0, 3840, 2160)
         // All read out      binning    hmax  vmax      vmax   vmax  blkl  blkl  retrigger
