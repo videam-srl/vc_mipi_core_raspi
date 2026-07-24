@@ -1016,17 +1016,22 @@ static void vc_init_ctrl_imx585(struct vc_ctrl *ctrl, struct vc_desc* desc)
         MODE( 2, 4, FORMAT_RAW10, 0,    550,     8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
         MODE( 3, 4, FORMAT_RAW12, 0,    550,     8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
 
-        // 2x2 binning (outputs 1928x1090). Confirmed as a real, Sony-
+        // 2x2 binning (outputs 1920x1080). Confirmed as a real, Sony-
         // documented readout mode (datasheet: "Horizontal/Vertical 2/2-line
         // binning mode"), previously never wired up in this driver at all
         // (max_binning_modes_used defaulted to 0). hmax_min for the 4-lane
         // entries is ported from github.com/Kurokesu/imx585-rpi-driver's
-        // binned mode table; the 2-lane hmax_min is estimated by applying
-        // the same 2x scaling this driver's own non-binned 2-lane vs 4-lane
-        // entries above already show (1100 = 2*550) - needs verification
-        // against real hardware, same as the rest of this table.
-        MODE( 4, 2, FORMAT_RAW10, 1,     732,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
-        MODE( 5, 2, FORMAT_RAW12, 1,     732,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
+        // binned mode table. The 2-lane hmax_min was first estimated at 732
+        // (2x the 4-lane value, matching this table's own non-binned 2x
+        // scaling) - on real hardware this produced valid-looking data in
+        // only the left half of each row (right half zero), consistent
+        // with the line time being too short for the sensor's actual
+        // internal per-row processing time. Reusing the non-binned 2-lane
+        // value (1100) instead, per Kurokesu's own comment that the
+        // sensor's internal readout speed doesn't actually change with
+        // binning - needs reverifying on real hardware.
+        MODE( 4, 2, FORMAT_RAW10, 1,    1100,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
+        MODE( 5, 2, FORMAT_RAW12, 1,    1100,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
         MODE( 6, 4, FORMAT_RAW10, 1,     366,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
         MODE( 7, 4, FORMAT_RAW12, 1,     366,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
 
