@@ -351,6 +351,7 @@ int vc_write_i2c_reg4(struct i2c_client *client, struct vc_csr4 *csr, const __u3
 
 // --- Clear HDR (IMX585 only) ------------------------------------------------
 int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable);
+__u8 vc_core_mbus_code_to_format(__u32 code);
 
 struct i2c_client *vc_mod_get_client(struct device *dev, struct i2c_adapter *adapter, __u8 i2c_addr);
 

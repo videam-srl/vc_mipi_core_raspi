@@ -74,7 +74,7 @@ int vc_core_try_format(struct vc_cam *cam, __u32 code);
 __u32 vc_core_calculate_max_exposure(struct vc_cam *cam, __u8 num_lanes, __u8 format, __u8 binning);
 __u32 vc_core_calculate_max_frame_rate(struct vc_cam *cam, __u8 num_lanes, __u8 format, __u8 binning, __u32 height);
 static __u32 vc_core_calculate_period_1H(struct vc_cam *cam, __u8 num_lanes, __u8 format, __u8 binning);
-static __u8 vc_core_mbus_code_to_format(__u32 code);
+__u8 vc_core_mbus_code_to_format(__u32 code);
 void vc_core_calculate_roi(struct vc_cam *cam, __u32 *w_left, __u32 *w_right, __u32 *w_width,
         __u32 *w_top, __u32 *w_bottom, __u32 *w_height, __u32 *o_width, __u32 *o_height);
 static int vc_sen_read_image_size(struct vc_ctrl *ctrl, struct vc_frame *size);
@@ -302,15 +302,21 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
         // negotiated pad format is still 10-bit (the sensor's default),
         // every downstream consumer (CSI receiver, capture node, any
         // userspace app) keeps unpacking the now-12-bit wire data as 10-bit,
-        // corrupting every frame. Confirmed on hardware: enabling HDR
-        // without first switching format to SRGGB12_1X12 produces a
-        // near-black/no-signal image, not an error - so this must be
-        // caught here rather than left to silently misbehave.
+        // corrupting every frame. This is only a last-resort safety net -
+        // V4L2_CID_VC_HDR_MODE in vc_mipi_camera.c is the primary guard,
+        // rejecting the control write itself before this is ever reached
+        // in the normal case. Do NOT return an error from here: this
+        // function is called from vc_sen_start_stream(), which feeds
+        // .s_stream(1) - on Raspberry Pi 5, any error returned from a
+        // subdev's .s_stream(1) crashes rp1-cfe's own error-unwind path
+        // (NULL deref in csi2_stop_channel(), confirmed on real hardware).
+        // So degrade gracefully instead: skip enabling HDR and let the
+        // stream start normally without it.
         if (enable && vc_core_mbus_code_to_format(state->format_code) != FORMAT_RAW12) {
-                vc_err(dev, "%s(): Clear HDR requires a 12-bit RAW12 format to be negotiated first "
-                        "(e.g. via media-ctl), not the current format 0x%08x\n",
-                        __FUNCTION__, state->format_code);
-                return -EINVAL;
+                vc_warn(dev, "%s(): Clear HDR requires a 12-bit RAW12 format to be negotiated first "
+                        "(e.g. via media-ctl), not the current format 0x%08x - not enabling HDR "
+                        "for this stream\n", __FUNCTION__, state->format_code);
+                enable = 0;
         }
 
         if (enable) {
@@ -515,7 +521,7 @@ static int __maybe_unused vc_core_get_fourcc_fmt(__u32 code, char *buf, bool pac
         return 0;
 }
 
-static __u8 vc_core_mbus_code_to_format(__u32 code)
+__u8 vc_core_mbus_code_to_format(__u32 code)
 {
         switch (code) {
         case MEDIA_BUS_FMT_Y8_1X8:
@@ -537,6 +543,7 @@ static __u8 vc_core_mbus_code_to_format(__u32 code)
         }
         return 0;
 }
+EXPORT_SYMBOL(vc_core_mbus_code_to_format);
 
 static __u32 vc_core_format_to_mbus_code(__u8 format, int is_color, int is_gbrg)
 {
