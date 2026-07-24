@@ -366,7 +366,24 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
         }
 
         if (enable) {
-                ret  = vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x10);
+                // Explicitly force "internal sync leader" (sensor free-runs on
+                // its own clock and drives XVS/XHS out) instead of relying on
+                // whatever sync-mode state the sensor happens to reset into.
+                // Ported from github.com/Kurokesu/imx585-rpi-driver's default
+                // sync_mode=SYNC_INT_LEADER register writes - our driver never
+                // configures this at all otherwise. Read back on our hardware
+                // showed EXTMODE and XXS_DRV already matched this by luck, but
+                // XXS_OUTSEL did not (0x00 instead of 0x0A) - if that leaves
+                // the sensor's own sync generator not actually driving the
+                // XVS/XHS pins, it would explain the non-deterministic frame
+                // corruption seen only in Clear HDR (whose longer per-frame
+                // timing is far more sensitive to marginal sync instability
+                // than normal mode's shorter, simpler timing).
+                ret  = vc_write_i2c_reg(client, 0x30ce, 0x00); // EXTMODE
+                ret |= vc_write_i2c_reg(client, 0x30a6, 0x00); // XXS_DRV
+                ret |= vc_write_i2c_reg(client, 0x30a4, 0x0a); // XXS_OUTSEL
+
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x10);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.combi_en, 0x02);
                 ret |= i2c_write_regs(client, imx585_clear_hdr_extra_regs, __FUNCTION__);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x01);
