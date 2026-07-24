@@ -327,6 +327,19 @@ struct vc_state {
         __u8 former_binning_mode;
         bool hdr_mode_enabled;          // Clear HDR (see FLAG_CLEAR_HDR); only latched at stream start
         __u8 hdr_gain;                  // HDR Gain Adder index (EXP_GAIN, 0x3081): 0=+0dB .. 5=+29.1dB, live-writable
+
+        // Clear HDR gradation-compression curve (all live-writable, see
+        // vc_core_set_hdr_curve() in vc_mipi_core.c). Never written by this
+        // driver before - confirmed on real hardware to sit at the sensor's
+        // power-on default of 0 for every field, which is a no-op curve
+        // (immediate clipping, no highlight detail preserved).
+        __u16 hdr_datasel_th_h;         // EXP_TH_H  (0x36d0, 16-bit)
+        __u16 hdr_datasel_th_l;         // EXP_TH_L  (0x36d4, 16-bit)
+        __u8  hdr_datasel_bk;           // EXP_BK    (0x36e2, blend ratio menu index)
+        __u32 hdr_grad_th1;             // CCMP1_EXP (0x36e8, 24-bit, only low 17 bits used)
+        __u32 hdr_grad_th2;             // CCMP2_EXP (0x36e4, 24-bit, only low 17 bits used)
+        __u8  hdr_grad_comp_l;          // ACMP1_EXP (0x36ee, compression slope menu index)
+        __u8  hdr_grad_comp_h;          // ACMP2_EXP (0x36ec, compression slope menu index)
         int power_on;
         int streaming;
         __u8 flags;
@@ -353,6 +366,7 @@ int vc_write_i2c_reg4(struct i2c_client *client, struct vc_csr4 *csr, const __u3
 // --- Clear HDR (IMX585 only) ------------------------------------------------
 int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable);
 int vc_core_set_hdr_gain(struct vc_cam *cam, __u8 value);
+int vc_core_set_hdr_curve(struct vc_cam *cam);
 __u8 vc_core_mbus_code_to_format(__u32 code);
 
 struct i2c_client *vc_mod_get_client(struct device *dev, struct i2c_adapter *adapter, __u8 i2c_addr);

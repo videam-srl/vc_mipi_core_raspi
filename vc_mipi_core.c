@@ -390,6 +390,7 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
                 ret |= vc_write_i2c_reg(client, 0x3081, state->hdr_gain); // EXP_GAIN
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x01);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x01);
+                ret |= vc_core_set_hdr_curve(cam);
         } else {
                 ret  = vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x00);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.combi_en, 0x00);
@@ -441,6 +442,61 @@ int vc_core_set_hdr_gain(struct vc_cam *cam, __u8 value)
         return 0;
 }
 EXPORT_SYMBOL(vc_core_set_hdr_gain);
+
+// Gradation-compression curve (see the vc_state fields' comments in
+// vc_mipi_core.h for what each register does). Confirmed on real hardware
+// (readback, both idle and mid-stream) that this driver has never written
+// any of these registers before - they sit at the sensor's power-on
+// default of 0 for every field, which is a no-op curve: DATASEL_TH/BK
+// blend at a zero threshold and GRAD_COMP_L/H at index 0 (1/1, i.e. no
+// compression), so any signal beyond the linear code range is simply
+// clipped rather than compressed-and-recoverable. Like EXP_GAIN, none of
+// these appear to be latched at stream start (ordinary data registers,
+// not mode-select strobes like WDMODE/CCMP_EN) - Kurokesu's driver writes
+// them directly from V4L2 controls with no streaming-state guard - so
+// this is safe to call at any time. All six are re-applied together
+// (cheap, and they're normally tuned as a set) whenever any one of them
+// changes, and again from vc_core_set_clear_hdr_mode()'s enable path so a
+// stream restart doesn't leave the curve reset to the chip's default.
+int vc_core_set_hdr_curve(struct vc_cam *cam)
+{
+        struct vc_ctrl *ctrl = &cam->ctrl;
+        struct vc_state *state = &cam->state;
+        struct i2c_client *client = ctrl->client_sen;
+        struct device *dev = &client->dev;
+        int ret;
+
+        if (!(ctrl->flags & FLAG_CLEAR_HDR))
+                return -EINVAL;
+
+        // EXP_TH_H / EXP_TH_L (0x36d0 / 0x36d4, 16-bit LE)
+        ret  = vc_write_i2c_reg(client, 0x36d0, state->hdr_datasel_th_h & 0xff);
+        ret |= vc_write_i2c_reg(client, 0x36d1, (state->hdr_datasel_th_h >> 8) & 0xff);
+        ret |= vc_write_i2c_reg(client, 0x36d4, state->hdr_datasel_th_l & 0xff);
+        ret |= vc_write_i2c_reg(client, 0x36d5, (state->hdr_datasel_th_l >> 8) & 0xff);
+
+        // EXP_BK (0x36e2, 8-bit)
+        ret |= vc_write_i2c_reg(client, 0x36e2, state->hdr_datasel_bk);
+
+        // CCMP2_EXP / CCMP1_EXP (0x36e4 / 0x36e8, 24-bit LE)
+        ret |= vc_write_i2c_reg(client, 0x36e4, state->hdr_grad_th2 & 0xff);
+        ret |= vc_write_i2c_reg(client, 0x36e5, (state->hdr_grad_th2 >> 8) & 0xff);
+        ret |= vc_write_i2c_reg(client, 0x36e6, (state->hdr_grad_th2 >> 16) & 0xff);
+        ret |= vc_write_i2c_reg(client, 0x36e8, state->hdr_grad_th1 & 0xff);
+        ret |= vc_write_i2c_reg(client, 0x36e9, (state->hdr_grad_th1 >> 8) & 0xff);
+        ret |= vc_write_i2c_reg(client, 0x36ea, (state->hdr_grad_th1 >> 16) & 0xff);
+
+        // ACMP2_EXP / ACMP1_EXP (0x36ec / 0x36ee, 8-bit each)
+        ret |= vc_write_i2c_reg(client, 0x36ec, state->hdr_grad_comp_h);
+        ret |= vc_write_i2c_reg(client, 0x36ee, state->hdr_grad_comp_l);
+
+        if (ret)
+                vc_err(dev, "%s(): Unable to apply HDR gradation-compression curve (error: %d)\n",
+                        __FUNCTION__, ret);
+
+        return ret;
+}
+EXPORT_SYMBOL(vc_core_set_hdr_curve);
 
 // ------------------------------------------------------------------------------------------------
 //  Helper Functions for debugging
@@ -1402,6 +1458,18 @@ static void vc_core_state_init(struct vc_cam *cam)
         state->streaming = 0;
         state->flags = 0x00;
         state->hdr_gain = 2; // +12dB, matches Kurokesu's own default
+
+        // Gradation-compression curve defaults, matching Kurokesu's own
+        // defaults (a sensible, tested starting point) rather than the
+        // sensor's power-on-reset value of 0 for all of these (a no-op
+        // curve - see vc_core_set_hdr_curve()'s comment).
+        state->hdr_datasel_th_h = 512;
+        state->hdr_datasel_th_l = 1024;
+        state->hdr_datasel_bk = 0;
+        state->hdr_grad_th1 = 500;
+        state->hdr_grad_th2 = 11500;
+        state->hdr_grad_comp_l = 2; // 1/4
+        state->hdr_grad_comp_h = 6; // 1/64
 
 #ifdef ENABLE_ADVANCED_CONTROL
         state->hmax_overwrite = 0;
