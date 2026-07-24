@@ -2106,6 +2106,8 @@ int vc_sen_set_roi(struct vc_cam *cam)
         // window caused it to crop before binning rather than after.
         // Skipping these writes entirely (matching Kurokesu exactly) avoids
         // guessing what the "correct" physical-space value should be.
+        // Confirmed on real hardware: this fixed it, full 1920x1080 frame
+        // valid (both standalone and combined with Clear HDR).
         if (MOD_ID_IMX585 == desc->mod_id && state->binning_mode > 0) {
                 ret |= vc_sen_write_binning_mode_regs(cam);
                 ret |= vc_sen_set_hmax(cam);
