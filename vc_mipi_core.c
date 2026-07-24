@@ -74,6 +74,7 @@ int vc_core_try_format(struct vc_cam *cam, __u32 code);
 __u32 vc_core_calculate_max_exposure(struct vc_cam *cam, __u8 num_lanes, __u8 format, __u8 binning);
 __u32 vc_core_calculate_max_frame_rate(struct vc_cam *cam, __u8 num_lanes, __u8 format, __u8 binning, __u32 height);
 static __u32 vc_core_calculate_period_1H(struct vc_cam *cam, __u8 num_lanes, __u8 format, __u8 binning);
+static __u8 vc_core_mbus_code_to_format(__u32 code);
 void vc_core_calculate_roi(struct vc_cam *cam, __u32 *w_left, __u32 *w_right, __u32 *w_width,
         __u32 *w_top, __u32 *w_bottom, __u32 *w_height, __u32 *o_width, __u32 *o_height);
 static int vc_sen_read_image_size(struct vc_ctrl *ctrl, struct vc_frame *size);
@@ -289,11 +290,28 @@ EXPORT_SYMBOL(vc_write_i2c_reg2);
 int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
 {
         struct vc_ctrl *ctrl = &cam->ctrl;
+        struct vc_state *state = &cam->state;
         struct i2c_client *client = ctrl->client_sen;
+        struct device *dev = &client->dev;
         int ret;
 
         if (!(ctrl->flags & FLAG_CLEAR_HDR))
                 return -EINVAL;
+
+        // MDBIT=0x01/CCMP_EN=0x01 select 12-bit compressed output - if the
+        // negotiated pad format is still 10-bit (the sensor's default),
+        // every downstream consumer (CSI receiver, capture node, any
+        // userspace app) keeps unpacking the now-12-bit wire data as 10-bit,
+        // corrupting every frame. Confirmed on hardware: enabling HDR
+        // without first switching format to SRGGB12_1X12 produces a
+        // near-black/no-signal image, not an error - so this must be
+        // caught here rather than left to silently misbehave.
+        if (enable && vc_core_mbus_code_to_format(state->format_code) != FORMAT_RAW12) {
+                vc_err(dev, "%s(): Clear HDR requires a 12-bit RAW12 format to be negotiated first "
+                        "(e.g. via media-ctl), not the current format 0x%08x\n",
+                        __FUNCTION__, state->format_code);
+                return -EINVAL;
+        }
 
         if (enable) {
                 ret  = vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x10);
