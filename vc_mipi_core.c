@@ -2689,7 +2689,7 @@ int vc_sen_set_exposure(struct vc_cam *cam, int exposure_us)
                 case REG_TRIGGER_STREAM_LEVEL:
                         vc_calculate_exposure(cam, exposure_us);
 
-                        if(state->vmax_overwrite > 0) 
+                        if(state->vmax_overwrite > 0)
                         {
                                 // Re-calculate SHS against the overwrite VMAX so exposure
                                 // is correct at the forced frame rate instead of always
@@ -2701,6 +2701,18 @@ int vc_sen_set_exposure(struct vc_cam *cam, int exposure_us)
                                 }
                                 // If overwrite VMAX <= natural VMAX the shs from
                                 // vc_calculate_exposure() is already correct.
+
+                                // Clear HDR requires both VMAX and SHR to always be even
+                                // (ported from github.com/Kurokesu/imx585-rpi-driver, which
+                                // masks both with "& ~1U" unconditionally - "SHR always a
+                                // multiple of 2"). Our non-HDR path has run fine without this
+                                // for a long time, so scope it to Clear HDR only rather than
+                                // risk regressing other sensors sharing this code path.
+                                if (ctrl->flags & FLAG_CLEAR_HDR && state->hdr_mode_enabled) {
+                                        state->vmax_overwrite &= ~1U;
+                                        state->shs &= ~1U;
+                                }
+
                                 ret |= vc_sen_write_vmax(ctrl, state->vmax_overwrite);
                                 ret |= vc_sen_write_shs(ctrl, state->shs);
                                 ret |= vc_sen_set_hmax(cam);
@@ -2708,6 +2720,10 @@ int vc_sen_set_exposure(struct vc_cam *cam, int exposure_us)
                         }
                         else
                         {
+                                if (ctrl->flags & FLAG_CLEAR_HDR && state->hdr_mode_enabled) {
+                                        state->vmax &= ~1U;
+                                        state->shs &= ~1U;
+                                }
                                 ret |= vc_sen_write_shs(ctrl, state->shs);
                                 ret |= vc_sen_write_vmax(ctrl, state->vmax);
 
