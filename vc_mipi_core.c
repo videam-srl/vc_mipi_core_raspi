@@ -393,7 +393,15 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.combi_en, 0x00);
                 ret |= i2c_write_regs(client, imx585_normal_mode_extra_regs, __FUNCTION__);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x00);
-                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x00);
+                // MDBIT=0x00 selects RAW10, which this driver never negotiates
+                // (only RAW12 is wired up - see the enable-path comment above).
+                // Writing 0x00 here mismatched the actual RAW12 pipeline format
+                // and broke every non-HDR frame too (confirmed on real hardware:
+                // all-zero frames even at long exposure) - this register was
+                // never touched by the driver before Clear HDR was added, so
+                // 0x01 (12-bit) is the only value consistent with the format
+                // this driver actually uses in both HDR and non-HDR mode.
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x01);
         }
 
         return ret;
