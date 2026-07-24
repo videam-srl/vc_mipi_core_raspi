@@ -287,6 +287,52 @@ EXPORT_SYMBOL(vc_write_i2c_reg2);
 //  minimum (550 1H units at 4 lanes, scaled for lane count) for every
 //  existing IMX585 MODE() entry, so no HMAX adjustment is needed here.
 
+// Additional registers required alongside WDMODE/COMBI_EN/CCMP_EN/MDBIT,
+// ported from the community driver github.com/Kurokesu/imx585-rpi-driver
+// (a dedicated, independently-developed IMX585 Raspberry Pi driver). Our
+// original 4-register write left the sensor in an incomplete/undefined
+// HDR state that produced non-deterministic frame corruption on real
+// hardware (flat single-value frames, or a hard-zero tail) - these are
+// mirrored on both the enable and disable side in the reference driver,
+// confirming they are required, not optional. Meaning of most of these
+// (0x3069, 0x3074, 0x3a4c/4d, 0x3a50/51, 0x3e10 "ADTHEN") is undocumented
+// beyond the reference driver's own comments; 0x3930/3931 is a 16-bit
+// "DUR" (duration) register and 0x493c/0x4940 are 10-bit/12-bit
+// HDR-specific output settings (0x23 normal vs 0x41 HDR) - the most
+// likely candidates for the actual row-corruption root cause, since they
+// look output-format-related. 0x3081 (EXP_GAIN) defaults to +12dB in HDR.
+static const vc_reg imx585_clear_hdr_extra_regs[] = {
+        { 0x3069, 0x02 },
+        { 0x3074, 0x63 },
+        { 0x3930, 0xe6 }, // DUR[15:8] (12-bit)
+        { 0x3931, 0x00 }, // DUR[7:0]  (12-bit)
+        { 0x3a4c, 0x61 },
+        { 0x3a4d, 0x02 },
+        { 0x3a50, 0x70 },
+        { 0x3a51, 0x02 },
+        { 0x3e10, 0x17 }, // ADTHEN
+        { 0x493c, 0x41 }, // 10-bit HDR
+        { 0x4940, 0x41 }, // 12-bit HDR
+        { 0x3081, 0x02 }, // EXP_GAIN: +12 dB default
+        { 0, 0 },
+};
+
+static const vc_reg imx585_normal_mode_extra_regs[] = {
+        { 0x3069, 0x00 },
+        { 0x3074, 0x64 },
+        { 0x3930, 0x0c }, // DUR[15:8] (12-bit)
+        { 0x3931, 0x01 }, // DUR[7:0]  (12-bit)
+        { 0x3a4c, 0x39 },
+        { 0x3a4d, 0x01 },
+        { 0x3a50, 0x48 },
+        { 0x3a51, 0x01 },
+        { 0x3e10, 0x10 }, // ADTHEN
+        { 0x493c, 0x23 }, // 10-bit Normal
+        { 0x4940, 0x23 }, // 12-bit Normal
+        { 0x3081, 0x00 }, // EXP_GAIN reset
+        { 0, 0 },
+};
+
 int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
 {
         struct vc_ctrl *ctrl = &cam->ctrl;
@@ -322,11 +368,13 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
         if (enable) {
                 ret  = vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x10);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.combi_en, 0x02);
+                ret |= i2c_write_regs(client, imx585_clear_hdr_extra_regs, __FUNCTION__);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x01);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x01);
         } else {
                 ret  = vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x00);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.combi_en, 0x00);
+                ret |= i2c_write_regs(client, imx585_normal_mode_extra_regs, __FUNCTION__);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x00);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x00);
         }
