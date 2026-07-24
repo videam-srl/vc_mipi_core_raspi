@@ -2223,11 +2223,20 @@ int vc_sen_start_stream(struct vc_cam *cam)
                 vc_sen_stop_stream(cam);
         }
 
-        if ((ctrl->flags & FLAG_EXPOSURE_SONY || ctrl->flags & FLAG_EXPOSURE_NORMAL) || 
+        if ((ctrl->flags & FLAG_EXPOSURE_SONY || ctrl->flags & FLAG_EXPOSURE_NORMAL) ||
             (ctrl->flags & FLAG_EXPOSURE_OMNIVISION && !vc_mod_is_trigger_enabled(cam))) {
         ret |= vc_sen_write_mode(ctrl, ctrl->csr.sen.mode_operating);
         if (ret)
                 vc_err(dev, "%s(): Unable to start streaming (error: %d)\n", __FUNCTION__, ret);
+
+        // Settling delay ported from github.com/Kurokesu/imx585-rpi-driver
+        // (IMX585_STREAM_DELAY_US = 25000): that driver waits ~25ms after
+        // writing the streaming-enable register before considering the
+        // stream started. Gated to Clear HDR only since that is the only
+        // case verified to need it so far - normal-mode streaming hasn't
+        // shown this problem.
+        if (ctrl->flags & FLAG_CLEAR_HDR && state->hdr_mode_enabled)
+                usleep_range(25000, 26000);
         }
 
 
