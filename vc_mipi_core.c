@@ -2248,6 +2248,18 @@ int vc_sen_start_stream(struct vc_cam *cam)
                 vc_sen_stop_stream(cam);
         }
 
+        if (ctrl->flags & FLAG_CLEAR_HDR) {
+                // XMSTA (0x3002): ported from github.com/Kurokesu/imx585-rpi-driver,
+                // which writes this immediately before the streaming-enable register
+                // on every stream start (not just Clear HDR) when not in external-sync
+                // mode. Our driver never wrote this at all - harmless for normal mode
+                // (register's reset default already matches), but Clear HDR reprograms
+                // WDMODE/COMBI_EN/the DUR timing registers, and the sensor's internal
+                // timing generator may need this written to actually re-latch that new
+                // configuration, which would explain the flat/frozen output seen so far.
+                ret |= vc_write_i2c_reg(ctrl->client_sen, 0x3002, 0x00);
+        }
+
         if ((ctrl->flags & FLAG_EXPOSURE_SONY || ctrl->flags & FLAG_EXPOSURE_NORMAL) ||
             (ctrl->flags & FLAG_EXPOSURE_OMNIVISION && !vc_mod_is_trigger_enabled(cam))) {
         ret |= vc_sen_write_mode(ctrl, ctrl->csr.sen.mode_operating);
