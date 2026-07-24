@@ -1044,7 +1044,25 @@ static void vc_init_ctrl_imx585(struct vc_ctrl *ctrl, struct vc_desc* desc)
         // BINNING_START/vc_sen_set_roi()) - full-resolution operation is
         // untouched, since this driver never wrote either register before
         // and the sensor's reset default already matches non-binned use.
-        BINNING_START(ctrl->binnings[1], 2, 2)
+        //
+        // h_factor/v_factor are passed as 1 (not the "real" 2x2 factor):
+        // vc_core_calculate_roi() multiplies the crop width/height it
+        // writes to the sensor by these factors, which produced a crop
+        // request twice as wide as the physical sensor array on real
+        // hardware (confirmed: only the left half of each binned row came
+        // back with real data, the rest read zero) - IMX585's crop
+        // registers appear to already be in binned-pixel coordinates once
+        // ADDMODE=1 is set, unlike whatever sensor this generic scaling
+        // was originally written for (no other sensor in this driver
+        // currently exercises a nonzero h_factor/v_factor). Using 1 here
+        // also avoids vc_core_get_optimized_vmax()'s matching v_factor
+        // scaling, which would otherwise double VMAX for binned mode -
+        // Kurokesu's own IMX585 driver explicitly keeps VMAX identical
+        // between 4K and 1080p-binned modes. Known side effect: this
+        // makes the h_scale/v_scale binning metadata reported to
+        // userspace (vc_mipi_camera.c) read 1 instead of 2, even though
+        // real 2x2 binning is happening - cosmetic only, not yet fixed.
+        BINNING_START(ctrl->binnings[1], 1, 1)
                 { 0x301b, 0x01 }, // ADDMODE: 2x2 binning
                 { 0x30d5, 0x02 } // DIG_CLP_VSTART: binning-specific value
         BINNING_END(ctrl->binnings[1])
