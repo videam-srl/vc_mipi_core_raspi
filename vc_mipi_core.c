@@ -345,10 +345,11 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
         if (!(ctrl->flags & FLAG_CLEAR_HDR))
                 return -EINVAL;
 
-        // MDBIT=0x01/CCMP_EN=0x01 select 12-bit compressed output - if the
-        // negotiated pad format is still 10-bit (the sensor's default),
+        // MDBIT/CCMP_EN select the output bit-depth and whether the
+        // combined signal gets gradation-compressed into it - if the
+        // negotiated pad format doesn't match what we write to MDBIT,
         // every downstream consumer (CSI receiver, capture node, any
-        // userspace app) keeps unpacking the now-12-bit wire data as 10-bit,
+        // userspace app) unpacks the wire data at the wrong bit depth,
         // corrupting every frame. This is only a last-resort safety net -
         // V4L2_CID_VC_HDR_MODE in vc_mipi_camera.c is the primary guard,
         // rejecting the control write itself before this is ever reached
@@ -359,10 +360,27 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
         // (NULL deref in csi2_stop_channel(), confirmed on real hardware).
         // So degrade gracefully instead: skip enabling HDR and let the
         // stream start normally without it.
-        if (enable && vc_core_mbus_code_to_format(state->format_code) != FORMAT_RAW12) {
-                vc_warn(dev, "%s(): Clear HDR requires a 12-bit RAW12 format to be negotiated first "
-                        "(e.g. via media-ctl), not the current format 0x%08x - not enabling HDR "
-                        "for this stream\n", __FUNCTION__, state->format_code);
+        //
+        // RAW10 Clear HDR: Kurokesu's own reference register sequence
+        // (which imx585_clear_hdr_extra_regs below is ported from) writes
+        // BOTH 0x493c ("10-bit HDR") and 0x4940 ("12-bit HDR") unconditionally,
+        // even though their own driver's UI only ever selects 12-bit or
+        // 16-bit output (MDBIT 0x01/0x03) - never 10-bit (MDBIT 0x00),
+        // despite that register clearly being pre-configured. Treating
+        // MDBIT as a genuinely independent "output word width" axis from
+        // WDMODE/COMBI_EN ("combine at all") and CCMP_EN ("compress the
+        // combined signal") - not a fixed enum of only two combined-mode
+        // values - RAW10 combined+compressed output should follow the same
+        // pattern as the already-verified RAW12 case (MDBIT=0x01,
+        // CCMP_EN=0x01), just with MDBIT=0x00. Untested on real hardware
+        // as of this writing - if it turns out MDBIT=0x00 does not
+        // actually work with WDMODE=Clear HDR active, this is the place to
+        // revert to RAW12-only.
+        __u8 hdr_format = vc_core_mbus_code_to_format(state->format_code);
+        if (enable && hdr_format != FORMAT_RAW12 && hdr_format != FORMAT_RAW10) {
+                vc_warn(dev, "%s(): Clear HDR requires a 10-bit RAW10 or 12-bit RAW12 format to be "
+                        "negotiated first (e.g. via media-ctl), not the current format 0x%08x - not "
+                        "enabling HDR for this stream\n", __FUNCTION__, state->format_code);
                 enable = 0;
         }
 
@@ -389,22 +407,28 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
                 ret |= i2c_write_regs(client, imx585_clear_hdr_extra_regs, __FUNCTION__);
                 ret |= vc_write_i2c_reg(client, 0x3081, state->hdr_gain); // EXP_GAIN
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x01);
-                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x01);
+                // MDBIT: output word width, independent of WDMODE/COMBI_EN
+                // ("combine at all") and CCMP_EN ("compress the combined
+                // signal") - 0x00 for RAW10, 0x01 for RAW12. Must match
+                // whatever pad format was actually negotiated (see the
+                // guard above and the disable-path comment below).
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, hdr_format == FORMAT_RAW10 ? 0x00 : 0x01);
                 ret |= vc_core_set_hdr_curve(cam);
         } else {
                 ret  = vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x00);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.combi_en, 0x00);
                 ret |= i2c_write_regs(client, imx585_normal_mode_extra_regs, __FUNCTION__);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x00);
-                // MDBIT=0x00 selects RAW10, which this driver never negotiates
-                // (only RAW12 is wired up - see the enable-path comment above).
-                // Writing 0x00 here mismatched the actual RAW12 pipeline format
-                // and broke every non-HDR frame too (confirmed on real hardware:
-                // all-zero frames even at long exposure) - this register was
-                // never touched by the driver before Clear HDR was added, so
-                // 0x01 (12-bit) is the only value consistent with the format
-                // this driver actually uses in both HDR and non-HDR mode.
-                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x01);
+                // MDBIT must match the negotiated pad format here too - this
+                // register was never touched by the driver before Clear HDR
+                // was added, and hardcoding it to a single value (0x01,
+                // 12-bit) regardless of the real format previously broke
+                // every non-HDR RAW12 frame (confirmed on real hardware:
+                // all-zero frames even at long exposure) before that was
+                // fixed. Now that RAW10 is a real, negotiable format for
+                // this sensor (not just RAW12), keep this format-dependent
+                // rather than reintroducing the same class of bug for RAW10.
+                ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, hdr_format == FORMAT_RAW10 ? 0x00 : 0x01);
         }
 
         return ret;
