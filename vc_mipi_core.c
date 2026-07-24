@@ -313,7 +313,8 @@ static const vc_reg imx585_clear_hdr_extra_regs[] = {
         { 0x3e10, 0x17 }, // ADTHEN
         { 0x493c, 0x41 }, // 10-bit HDR
         { 0x4940, 0x41 }, // 12-bit HDR
-        { 0x3081, 0x02 }, // EXP_GAIN: +12 dB default
+        // EXP_GAIN (0x3081) is written separately from cam->state.hdr_gain
+        // below - it's user-tunable via V4L2_CID_VC_HDR_GAIN, not fixed.
         { 0, 0 },
 };
 
@@ -386,6 +387,7 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.wdmode, 0x10);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.combi_en, 0x02);
                 ret |= i2c_write_regs(client, imx585_clear_hdr_extra_regs, __FUNCTION__);
+                ret |= vc_write_i2c_reg(client, 0x3081, state->hdr_gain); // EXP_GAIN
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.ccmp_en, 0x01);
                 ret |= vc_write_i2c_reg(client, ctrl->csr.sen.mdbit, 0x01);
         } else {
@@ -407,6 +409,38 @@ int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable)
         return ret;
 }
 EXPORT_SYMBOL(vc_core_set_clear_hdr_mode);
+
+// HDR Gain Adder (EXP_GAIN, 0x3081): extra gain applied to the short
+// exposure sub-frame before it's combined with the long exposure, to
+// compensate for it inherently capturing less light. Unlike WDMODE/
+// COMBI_EN this is not latched at stream start - ported from Kurokesu's
+// imx585-rpi-driver, which writes it directly from its V4L2 control
+// callback with no streaming-state guard - so this is safe to call at
+// any time, not just before starting a stream.
+// Index -> dB: 0=+0dB, 1=+6dB, 2=+12dB, 3=+18dB, 4=+24dB, 5=+29.1dB.
+int vc_core_set_hdr_gain(struct vc_cam *cam, __u8 value)
+{
+        struct vc_ctrl *ctrl = &cam->ctrl;
+        struct i2c_client *client = ctrl->client_sen;
+        struct device *dev = &client->dev;
+        int ret;
+
+        if (!(ctrl->flags & FLAG_CLEAR_HDR))
+                return -EINVAL;
+
+        if (value > 5)
+                value = 5;
+
+        ret = vc_write_i2c_reg(client, 0x3081, value);
+        if (ret) {
+                vc_err(dev, "%s(): Unable to set HDR gain adder (error: %d)\n", __FUNCTION__, ret);
+                return ret;
+        }
+
+        cam->state.hdr_gain = value;
+        return 0;
+}
+EXPORT_SYMBOL(vc_core_set_hdr_gain);
 
 // ------------------------------------------------------------------------------------------------
 //  Helper Functions for debugging
@@ -1367,6 +1401,7 @@ static void vc_core_state_init(struct vc_cam *cam)
         state->frame.height = ctrl->frame.height;
         state->streaming = 0;
         state->flags = 0x00;
+        state->hdr_gain = 2; // +12dB, matches Kurokesu's own default
 
 #ifdef ENABLE_ADVANCED_CONTROL
         state->hmax_overwrite = 0;

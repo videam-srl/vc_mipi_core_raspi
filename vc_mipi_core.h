@@ -326,6 +326,7 @@ struct vc_state {
         __u8 binning_mode;
         __u8 former_binning_mode;
         bool hdr_mode_enabled;          // Clear HDR (see FLAG_CLEAR_HDR); only latched at stream start
+        __u8 hdr_gain;                  // HDR Gain Adder index (EXP_GAIN, 0x3081): 0=+0dB .. 5=+29.1dB, live-writable
         int power_on;
         int streaming;
         __u8 flags;
@@ -351,6 +352,7 @@ int vc_write_i2c_reg4(struct i2c_client *client, struct vc_csr4 *csr, const __u3
 
 // --- Clear HDR (IMX585 only) ------------------------------------------------
 int vc_core_set_clear_hdr_mode(struct vc_cam *cam, int enable);
+int vc_core_set_hdr_gain(struct vc_cam *cam, __u8 value);
 __u8 vc_core_mbus_code_to_format(__u32 code);
 
 struct i2c_client *vc_mod_get_client(struct device *dev, struct i2c_adapter *adapter, __u8 i2c_addr);
