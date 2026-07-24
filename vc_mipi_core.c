@@ -1590,7 +1590,20 @@ int vc_mod_set_mode(struct vc_cam *cam, int *reset)
         state->former_binning_mode = state->binning_mode;
 
         mode = vc_mod_find_mode(cam, num_lanes, format, type, binning_mode);
-        if ( (mode == state->mode) && (!(ctrl->flags & FLAG_RESET_ALWAYS) && (type == MODE_TYPE_STREAM) && !reset_binning)) {
+        // Clear HDR always forces a full module reset (skips the "mode
+        // unchanged, nothing to do" fast path below). vc_sen_stop_stream()
+        // never powers the module down, so re-starting a stream with the
+        // same mode index normally reuses whatever internal state the
+        // module was left in - for Clear HDR specifically, restarting
+        // without a real vc_mod_reset_module() power-cycle was found (on
+        // real hardware) to reuse a degraded internal HDR-combination
+        // state: only the very first start_stream after a fresh boot (a
+        // real state->mode mismatch, forcing a real reset) produced good
+        // frames: every later same-config restart within the same boot
+        // silently skipped the reset here and produced corrupted frames.
+        if ( (mode == state->mode) && (!(ctrl->flags & FLAG_RESET_ALWAYS) &&
+             !(ctrl->flags & FLAG_CLEAR_HDR && state->hdr_mode_enabled) &&
+             (type == MODE_TYPE_STREAM) && !reset_binning)) {
                 vc_dbg(dev, "%s(): Module mode %u need not to be set!\n", __FUNCTION__, mode);
                 *reset = 0;
                 return 0;
