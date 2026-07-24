@@ -1016,7 +1016,33 @@ static void vc_init_ctrl_imx585(struct vc_ctrl *ctrl, struct vc_desc* desc)
         MODE( 2, 4, FORMAT_RAW10, 0,    550,     8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
         MODE( 3, 4, FORMAT_RAW12, 0,    550,     8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
 
-       
+        // 2x2 binning (outputs 1928x1090). Confirmed as a real, Sony-
+        // documented readout mode (datasheet: "Horizontal/Vertical 2/2-line
+        // binning mode"), previously never wired up in this driver at all
+        // (max_binning_modes_used defaulted to 0). hmax_min for the 4-lane
+        // entries is ported from github.com/Kurokesu/imx585-rpi-driver's
+        // binned mode table; the 2-lane hmax_min is estimated by applying
+        // the same 2x scaling this driver's own non-binned 2-lane vs 4-lane
+        // entries above already show (1100 = 2*550) - needs verification
+        // against real hardware, same as the rest of this table.
+        MODE( 4, 2, FORMAT_RAW10, 1,     732,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
+        MODE( 5, 2, FORMAT_RAW12, 1,     732,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
+        MODE( 6, 4, FORMAT_RAW10, 1,     366,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
+        MODE( 7, 4, FORMAT_RAW12, 1,     366,    8,  0x1ffff,  0x08ca,  0x3ff,   0x32,   0)
+
+        ctrl->max_binning_modes_used = 1;
+
+        // ADDMODE (0x301b) selects binned readout; DIG_CLP_VSTART (0x30d5)
+        // takes a different value in binned vs non-binned mode. Ported from
+        // Kurokesu's mode_1080_regs_12bit/mode_4k_regs_12bit register pairs.
+        // Only written when binning_mode=1 is actually selected (see
+        // BINNING_START/vc_sen_set_roi()) - full-resolution operation is
+        // untouched, since this driver never wrote either register before
+        // and the sensor's reset default already matches non-binned use.
+        BINNING_START(ctrl->binnings[1], 2, 2)
+                { 0x301b, 0x01 }, // ADDMODE: 2x2 binning
+                { 0x30d5, 0x02 }, // DIG_CLP_VSTART: binning-specific value
+        BINNING_END(ctrl->binnings[1])
 }
 
 // ------------------------------------------------------------------------------------------------
