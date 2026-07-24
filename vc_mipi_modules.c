@@ -1063,6 +1063,7 @@ static void vc_init_ctrl_imx585(struct vc_ctrl *ctrl, struct vc_desc* desc)
         // userspace (vc_mipi_camera.c) read 1 instead of 2, even though
         // real 2x2 binning is happening - cosmetic only, not yet fixed.
         BINNING_START(ctrl->binnings[1], 1, 1)
+                { 0x3019, 0x00 }, // BIN_MODE: color binning (this sensor variant is color)
                 { 0x301b, 0x01 }, // ADDMODE: 2x2 binning
                 { 0x30d5, 0x02 } // DIG_CLP_VSTART: binning-specific value
         BINNING_END(ctrl->binnings[1])

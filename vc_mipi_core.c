@@ -2067,6 +2067,7 @@ int vc_sen_set_roi(struct vc_cam *cam)
 {
         struct vc_ctrl *ctrl = &cam->ctrl;
         struct vc_desc *desc = &cam->desc;
+        struct vc_state *state = &cam->state;
 
         struct i2c_client *client = ctrl->client_sen;
         struct device *dev = &client->dev;
@@ -2088,6 +2089,31 @@ int vc_sen_set_roi(struct vc_cam *cam)
                 binning->h_factor, binning->v_factor);
 
         i2c_write_regs(client, binning->regs, __FUNCTION__);
+
+        // IMX585 2x2 binning: skip the crop/output-size register writes below
+        // entirely rather than trying to scale them for binned mode. Ported
+        // from github.com/Kurokesu/imx585-rpi-driver, whose driver NEVER
+        // writes any window-crop or output-size register for either of its
+        // modes (4K or 1080p-binned) - it relies entirely on the sensor's
+        // reset-default full-array crop plus ADDMODE (already written above
+        // via binning->regs) to determine the real output size. On real
+        // hardware, writing our own calculated crop/output-size values here
+        // (whether scaled by h_factor/v_factor or not) resulted in only a
+        // 960x540 quarter of the requested 1920x1080 frame containing real
+        // data (rest zero) - consistent with the sensor's window-crop
+        // registers being interpreted in physical (pre-binning) pixel space,
+        // so writing anything less than the true full 3840x2160 physical
+        // window caused it to crop before binning rather than after.
+        // Skipping these writes entirely (matching Kurokesu exactly) avoids
+        // guessing what the "correct" physical-space value should be.
+        if (MOD_ID_IMX585 == desc->mod_id && state->binning_mode > 0) {
+                ret |= vc_sen_write_binning_mode_regs(cam);
+                ret |= vc_sen_set_hmax(cam);
+                if (ret) {
+                        vc_err(dev, "%s(): Couldn't set sensor roi (binned)\n", __FUNCTION__);
+                }
+                return ret;
+        }
 
         vc_core_calculate_roi(cam, &w_left, &w_right, &w_width, &w_top, &w_bottom, &w_height, &o_width, &o_height);
 
@@ -2115,7 +2141,7 @@ int vc_sen_set_roi(struct vc_cam *cam)
                 if (MOD_ID_IMX412 == desc->mod_id) {
                         ret |= i2c_write_reg2(dev, client, &DIG_CROP_IMAGE_WIDTH, o_width, __FUNCTION__);
                         ret |= i2c_write_reg2(dev, client, &DIG_CROP_IMAGE_HEIGHT, o_height, __FUNCTION__);
-                } 
+                }
                 ret |= i2c_write_reg2(dev, client, &ctrl->csr.sen.h_end, w_right, __FUNCTION__);
                 ret |= i2c_write_reg2(dev, client, &ctrl->csr.sen.v_end, w_bottom, __FUNCTION__);
                 ret |= i2c_write_reg2(dev, client, &ctrl->csr.sen.w_width, w_width, __FUNCTION__);
