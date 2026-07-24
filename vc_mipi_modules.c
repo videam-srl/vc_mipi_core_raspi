@@ -1041,7 +1041,7 @@ static void vc_init_ctrl_imx585(struct vc_ctrl *ctrl, struct vc_desc* desc)
         // and the sensor's reset default already matches non-binned use.
         BINNING_START(ctrl->binnings[1], 2, 2)
                 { 0x301b, 0x01 }, // ADDMODE: 2x2 binning
-                { 0x30d5, 0x02 }, // DIG_CLP_VSTART: binning-specific value
+                { 0x30d5, 0x02 } // DIG_CLP_VSTART: binning-specific value
         BINNING_END(ctrl->binnings[1])
 }
 
